@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>海洋预报主持词生成器</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .drop-zone {
+            border: 2px dashed #4a5568;
+            transition: all 0.3s ease;
+            padding: 1rem; /* 减小内边距 */
+            max-height: 220px; /* 限制高度，超出显示滚动条 */
+            overflow: auto;
+        }
+        .drop-zone:hover {
+            border-color: #2b6cb0;
+            background-color: #f7fafc;
+        }
+        /* 在大屏（PC）上进一步缩小并左对齐，保持移动端不变 */
+        @media (min-width: 1024px) {
+            .drop-zone {
+                padding: 0.75rem;
+                max-width: 520px;
+                margin-left: 0; /* 改为左对齐 */
+                margin-right: auto;
+            }
+            .drop-zone svg {
+                height: 40px;
+                width: 40px;
+            }
+            .drop-zone .text-lg {
+                font-size: 1rem;
+            }
+        }
+
+        .loading {
+            display: none;
+        }
+        .loading.active {
+            display: flex;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold text-center mb-8 text-gray-800">海洋预报主持词生成器</h1>
+        
+        <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6">
+            <div class="mb-6">
+                <label for="model" class="block text-sm font-medium text-gray-700 mb-2">选择模型：</label>
+                <select id="model" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    <option value="qwen-vl-max-latest">阿里通义千问 VL</option>
+                    <option value="gpt-4.1-mini">OpenAI GPT-4.1 Mini</option>
+                </select>
+            </div>
+
+            <div class="mb-6">
+                <label for="prompt" class="block text-sm font-medium text-gray-700 mb-2">提示词：</label>
+                <textarea id="prompt" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">这些是我想上传的视频帧。它描述了中国海域的海浪高度。请生成海洋预报的解说词，以便我可以随视频一起上传。解说词不需要包含具体日期，颜色和海浪高度数字。解说词必须是中文的，大约150字左右。</textarea>
+            </div>
+
+            <div class="mb-6">
+                <label for="weather" class="block text-sm font-medium text-gray-700 mb-2">气象数据：</label>
+                <textarea id="weather" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">这里粘贴巴拉巴拉气温数据</textarea>
+            </div>
+
+            <div class="drop-zone rounded-lg p-8 text-center cursor-pointer" id="dropZone">
+                <!-- 用于选择文件夹的输入 -->
+                <input type="file" id="folderInput" webkitdirectory directory multiple accept=".png" class="hidden">
+                <!-- 用于选择文件的输入 -->
+                <input type="file" id="fileInput" multiple accept=".png" class="hidden">
+                <div class="text-gray-600">
+                    <svg class="mx-auto h-12 w-12 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <p class="text-lg mb-4">点击或拖拽文件到这里</p>
+                    <div class="flex justify-center space-x-4">
+                        <button onclick="folderInput.click()" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                            图片文件夹
+                        </button>
+                        <button onclick="fileInput.click()" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                            多张图片
+                        </button>
+                    </div>
+                    <p class="text-sm mt-4">支持PNG格式的图片或包含PNG图片的文件夹</p>
+                </div>
+            </div>
+
+            <div class="loading items-center justify-center mt-4" id="loading">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                <span class="ml-2 text-gray-600">正在生成主持词...</span>
+            </div>
+
+            <div class="mt-6" id="result" style="display: none;">
+                <h2 class="text-xl font-semibold mb-4 text-gray-800">生成的主持词：</h2>
+                <div class="bg-gray-50 rounded-lg p-4">
+                    <p id="commentary" class="text-gray-700 whitespace-pre-wrap"></p>
+                </div>
+                <button onclick="copyToClipboard()" class="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors">
+                    复制到剪贴板
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 配置 API 端点
+        const API_ENDPOINT = 'http://127.0.0.1:8080';
+
+        const dropZone = document.getElementById('dropZone');
+        const folderInput = document.getElementById('folderInput');
+        const fileInput = document.getElementById('fileInput');
+        const loading = document.getElementById('loading');
+        const result = document.getElementById('result');
+        const commentary = document.getElementById('commentary');
+        const promptInput = document.getElementById('prompt');
+        const weatherInput = document.getElementById('weather');
+        const modelSelect = document.getElementById('model');
+
+        // 添加页面加载时的调试信息
+        window.addEventListener('load', () => {
+            console.log('Available models:', Array.from(modelSelect.options).map(opt => opt.value));
+            console.log('Current selected model:', modelSelect.value);
+        });
+
+        // 添加模型选择变化的监听
+        modelSelect.addEventListener('change', () => {
+            console.log('Model changed to:', modelSelect.value);
+        });
+
+        // 处理文件拖放
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-500');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-blue-500');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500');
+            
+            // 检查是否拖拽的是文件夹
+            const items = e.dataTransfer.items;
+            if (items && items[0] && items[0].webkitGetAsEntry) {
+                const entry = items[0].webkitGetAsEntry();
+                if (entry && entry.isDirectory) {
+                    // 如果是文件夹，使用文件夹处理逻辑
+                    handleFolderDrop(e.dataTransfer.files);
+                } else {
+                    // 如果是文件，使用文件处理逻辑
+                    handleFiles(e.dataTransfer.files);
+                }
+            }
+        });
+
+        // 处理文件夹选择
+        folderInput.addEventListener('change', (e) => {
+            handleFolderDrop(e.target.files);
+        });
+
+        // 处理文件选择
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFolderDrop(files) {
+            if (files.length === 0) return;
+
+            // 过滤出PNG文件
+            const pngFiles = Array.from(files).filter(file => 
+                file.name.toLowerCase().endsWith('.png')
+            );
+
+            if (pngFiles.length === 0) {
+                alert('所选文件夹中没有PNG图片');
+                return;
+            }
+
+            // 按文件名排序
+            pngFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
+
+            processFiles(pngFiles);
+        }
+
+        function handleFiles(files) {
+            if (files.length === 0) return;
+
+            // 过滤出PNG文件
+            const pngFiles = Array.from(files).filter(file => 
+                file.name.toLowerCase().endsWith('.png')
+            );
+
+            if (pngFiles.length === 0) {
+                alert('没有找到PNG图片');
+                return;
+            }
+
+            // 按文件名排序
+            pngFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
+
+            processFiles(pngFiles);
+        }
+
+        function processFiles(pngFiles) {
+            const formData = new FormData();
+            for (let file of pngFiles) {
+                formData.append('folder', file);
+            }
+            formData.append('prompt', promptInput.value);
+            formData.append('weather', weatherInput.value);
+            formData.append('model', modelSelect.value);
+            formData.append('timestamp', new Date().getTime());
+            
+            // 添加调试信息
+            console.log('Selected model:', modelSelect.value);
+            console.log('Timestamp:', new Date().getTime());
+            console.log('Number of PNG files:', pngFiles.length);
+            console.log('File names:', pngFiles.map(f => f.name));
+
+            loading.classList.add('active');
+            result.style.display = 'none';
+
+            fetch(`${API_ENDPOINT}/process`, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                loading.classList.remove('active');
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                commentary.textContent = data.commentary;
+                result.style.display = 'block';
+                
+                // 显示使用的模型和时间戳
+                const modelInfo = document.createElement('div');
+                modelInfo.className = 'model-info mt-2 text-sm text-gray-600';
+                const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : '未知时间';
+                modelInfo.textContent = `使用的模型: ${data.model_used} (${timestamp})`;
+                result.appendChild(modelInfo);
+            })
+            .catch(error => {
+                loading.classList.remove('active');
+                alert('处理过程中出现错误：' + error);
+            });
+        }
+
+        function copyToClipboard() {
+            const text = commentary.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                // 创建临时提示元素
+                const toast = document.createElement('div');
+                toast.textContent = '已复制到剪贴板';
+                toast.style.cssText = `
+                    position: fixed;
+                    bottom: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background-color: rgba(0, 0, 0, 0.8);
+                    color: white;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    z-index: 1000;
+                `;
+                document.body.appendChild(toast);
+                
+                // 2秒后自动移除提示
+                setTimeout(() => {
+                    toast.style.opacity = '0';
+                    toast.style.transition = 'opacity 0.5s ease';
+                    setTimeout(() => document.body.removeChild(toast), 500);
+                }, 2000);
+            }).catch(err => {
+                console.error('复制失败：', err);
+            });
+        }
+    </script>
+</body>
+</html>
